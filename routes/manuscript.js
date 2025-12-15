@@ -28,5 +28,8 @@ router.post('/submit',
 
 router.get('/my-manuscripts', auth, authorize('author'), getMyManuscripts);
 router.get('/:id', auth, getManuscript);
+// router.put('/:id/assign');
+// router.put('/:id/status');
+
 
 module.exports = router;
