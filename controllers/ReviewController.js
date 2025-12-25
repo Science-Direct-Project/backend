@@ -17,24 +17,18 @@ exports.submitReview = async (req, res) => {
       recommendation
     } = req.body;
 
-    // Check if assignment exists and reviewer is assigned (pending or accepted)
+    // Check if assignment exists and reviewer is assigned
     const assignment = await Assignment.findOne({
       manuscript: manuscriptId,
       reviewer: req.user.id,
-      status: { $in: ['pending', 'accepted'] }
+      status: 'accepted'
     }).populate('manuscript');
 
     if (!assignment) {
       return res.status(404).json({
         success: false,
-        message: 'Review assignment not found or already completed'
+        message: 'Review assignment not found or not accepted'
       });
-    }
-
-    // Auto-accept if still pending
-    if (assignment.status === 'pending') {
-      assignment.status = 'accepted';
-      await assignment.save();
     }
 
     // Check if review already exists for this round
@@ -284,7 +278,7 @@ exports.updateReview = async (req, res) => {
  */
 exports.getMyReviews = async (req, res) => {
   try {
-    const { status, page = 1, limit = 100 } = req.query;
+    const { status, page = 1, limit = 10 } = req.query;
 
     let query = { reviewer: req.user.id };
     if (status) {
@@ -338,75 +332,30 @@ exports.getReviewerStatistics = async (req, res) => {
   try {
     const reviewerId = req.user.id;
 
-    // Get all completed reviews with their recommendations
-    const completedReviews = await Review.find({
-      reviewer: reviewerId,
-      status: 'submitted'
-    }).populate({
-      path: 'manuscript',
-      select: 'domain'
-    });
-
-    // Get assignments count by status
-    const [totalAssignments, pendingAssignments, acceptedAssignments, completedAssignments] = await Promise.all([
+    const [
+      totalAssignments,
+      pendingAssignments,
+      completedAssignments,
+      averageScore,
+      responseTime
+    ] = await Promise.all([
       Assignment.countDocuments({ reviewer: reviewerId }),
       Assignment.countDocuments({ reviewer: reviewerId, status: 'pending' }),
-      Assignment.countDocuments({ reviewer: reviewerId, status: 'accepted' }),
-      Assignment.countDocuments({ reviewer: reviewerId, status: 'completed' })
+      Assignment.countDocuments({ reviewer: reviewerId, status: 'completed' }),
+      Review.aggregate([
+        { $match: { reviewer: reviewerId } },
+        { $group: { _id: null, avgScore: { $avg: '$overallScore' } } }
+      ]),
+      calculateAverageResponseTime(reviewerId)
     ]);
-
-    // Calculate recommendation counts
-    const minorRevisions = completedReviews.filter(r => r.recommendation === 'minor_revisions').length;
-    const majorRevisions = completedReviews.filter(r => r.recommendation === 'major_revisions').length;
-    const acceptedManuscripts = completedReviews.filter(r => r.recommendation === 'accept').length;
-
-    // Calculate average score
-    const averageScoreResult = await Review.aggregate([
-      { $match: { reviewer: reviewerId, status: 'submitted' } },
-      { $group: { _id: null, avgScore: { $avg: '$overallScore' } } }
-    ]);
-
-    // Calculate fastest review (minimum response time)
-    const assignmentsWithReviews = await Assignment.find({
-      reviewer: reviewerId,
-      status: 'completed'
-    }).populate('review');
-
-    let fastestReviewDays = 0;
-    if (assignmentsWithReviews.length > 0) {
-      const responseTimes = assignmentsWithReviews
-        .filter(a => a.review && a.review.submittedDate)
-        .map(a => {
-          const responseTime = a.review.submittedDate - a.createdAt;
-          return responseTime / (1000 * 60 * 60 * 24); // Convert to days
-        });
-      fastestReviewDays = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
-    }
-
-    // Calculate top domain reviewed
-    const domainCounts = {};
-    completedReviews.forEach(review => {
-      if (review.manuscript && review.manuscript.domain) {
-        domainCounts[review.manuscript.domain] = (domainCounts[review.manuscript.domain] || 0) + 1;
-      }
-    });
-    const topDomain = Object.keys(domainCounts).length > 0
-      ? Object.keys(domainCounts).reduce((a, b) => domainCounts[a] > domainCounts[b] ? a : b)
-      : null;
-
-    const averageResponseTime = await calculateAverageResponseTime(reviewerId);
 
     const stats = {
       totalAssignments,
-      awaitingReview: pendingAssignments + acceptedAssignments, // pending + accepted
-      reviewSubmitted: completedAssignments,
-      averageScore: averageScoreResult.length > 0 ? parseFloat(averageScoreResult[0].avgScore.toFixed(2)) : 0,
-      fastestReviewDays: parseFloat(fastestReviewDays.toFixed(1)),
-      topDomainReviewed: topDomain,
-      minorRevisions,
-      majorRevisions,
-      acceptedManuscripts,
-      averageResponseTimeDays: parseFloat(averageResponseTime.toFixed(1))
+      pendingAssignments,
+      completedAssignments,
+      acceptanceRate: totalAssignments > 0 ? (completedAssignments / totalAssignments) * 100 : 0,
+      averageScore: averageScore.length > 0 ? averageScore[0].avgScore : 0,
+      averageResponseTime: responseTime
     };
 
     res.json({
@@ -471,67 +420,6 @@ exports.getReviewDetails = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching review details',
-      error: error.message
-    });
-  }
-};
-
-/**
- * @desc    Get manuscript details for review
- * @route   GET /api/reviews/manuscript/:manuscriptId/for-review
- * @access  Private (Reviewer)
- */
-exports.getManuscriptForReview = async (req, res) => {
-  try {
-    const { manuscriptId } = req.params;
-    const reviewerId = req.user.id;
-
-    // Check if reviewer is assigned to this manuscript
-    const assignment = await Assignment.findOne({
-      manuscript: manuscriptId,
-      reviewer: reviewerId,
-      status: { $in: ['pending', 'accepted'] }
-    });
-
-    if (!assignment) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not assigned to review this manuscript'
-      });
-    }
-
-    // Get manuscript with full details
-    const manuscript = await Manuscript.findById(manuscriptId)
-      .populate('correspondingAuthor', 'firstName lastName email profile.affiliation')
-      .populate('authors.user', 'firstName lastName email profile.affiliation');
-
-    if (!manuscript) {
-      return res.status(404).json({
-        success: false,
-        message: 'Manuscript not found'
-      });
-    }
-
-    // Get existing review if any
-    const existingReview = await Review.findOne({
-      manuscript: manuscriptId,
-      reviewer: reviewerId,
-      round: manuscript.currentRound
-    });
-
-    res.json({
-      success: true,
-      data: {
-        manuscript,
-        assignment,
-        existingReview
-      }
-    });
-  } catch (error) {
-    console.error('Get manuscript for review error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching manuscript for review',
       error: error.message
     });
   }

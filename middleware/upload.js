@@ -1,6 +1,6 @@
 // middleware/upload.js
 const multer = require('multer');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinaryStorage = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
 const config = require('../config/env');
 
@@ -10,7 +10,7 @@ const memoryStorage = multer.memoryStorage();
 // Cloudinary storage configuration
 let storage;
 try {
-  storage = new CloudinaryStorage({
+  storage = cloudinaryStorage({
     cloudinary: cloudinary,
     params: {
       folder: 'manuscripts',

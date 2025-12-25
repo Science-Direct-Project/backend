@@ -47,9 +47,7 @@ const manuscriptSchema = new mongoose.Schema({
       'revisions_required',
       'accepted',
       'rejected',
-      'published',
-      // Selected mirrors accepted for admin wording
-      'selected'
+      'published'
     ],
     default: 'submitted'
   },

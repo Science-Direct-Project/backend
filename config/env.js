@@ -4,7 +4,7 @@ require('dotenv').config();
 const config = {
   // Server
   NODE_ENV: process.env.NODE_ENV || 'development',
-  PORT: process.env.PORT || 3001,
+  PORT: process.env.PORT || 3000,
   
   // Database
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/editorial_manage',

@@ -8,7 +8,6 @@ const {
   declineReviewAssignment,
   getReviewerStatistics,
   getManuscriptReviews,
-  getManuscriptForReview,
   updateReview
 } = require('../controllers/ReviewController');
 const { auth, authorize } = require('../middleware/auth');
@@ -191,22 +190,6 @@ router.get(
     validate
   ],
   getReviewDetails
-);
-
-// @route   GET /api/reviews/manuscript/:manuscriptId/for-review
-// @desc    Get manuscript details for review
-// @access  Private (Reviewer)
-router.get(
-  '/manuscript/:manuscriptId/for-review',
-  [
-    auth,
-    authorize('reviewer'),
-    param('manuscriptId')
-      .isMongoId()
-      .withMessage('Valid manuscript ID is required'),
-    validate
-  ],
-  getManuscriptForReview
 );
 
 // @route   GET /api/reviews/manuscript/:manuscriptId
